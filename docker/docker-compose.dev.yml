@@ -1,0 +1,94 @@
+version: '3.9'
+
+# Local development only — mirrors production topology
+
+services:
+  # ---- Custody Vault API ----
+  custody-vault:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: builder
+    command: npx ts-node -r tsconfig-paths/register src/server.ts
+    ports:
+      - '3000:3000'
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DB_SERVER: mssql
+      DB_PORT: 1433
+      DB_NAME: custody_vault
+      DB_USER: sa
+      DB_PASSWORD: YourStrong@Password1
+      DB_ENCRYPT: 'false'
+      DB_TRUST_SERVER_CERT: 'true'
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      LOG_LEVEL: debug
+      # AKV — In dev, override with env vars for master seed
+      AZURE_KEY_VAULT_URL: ${AZURE_KEY_VAULT_URL:-}
+      AZURE_TENANT_ID: ${AZURE_TENANT_ID:-}
+      AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:-}
+      AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET:-}
+      MASTER_SEED_SECRET_NAME: custody-vault-master-seed
+      HMAC_SECRET: dev-only-hmac-secret-min-64-chars-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+      # Chain RPCs
+      ALCHEMY_ETH_RPC: ${ALCHEMY_ETH_RPC:-}
+      ALCHEMY_BSC_RPC: ${ALCHEMY_BSC_RPC:-}
+      ALCHEMY_POLYGON_RPC: ${ALCHEMY_POLYGON_RPC:-}
+      TRON_RPC_URL: https://nile.trongrid.io
+      SOLANA_RPC_URL: https://api.devnet.solana.com
+    volumes:
+      - ..:/app
+      - /app/node_modules
+    depends_on:
+      mssql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - custody-net
+    restart: unless-stopped
+
+  # ---- MS SQL Server ----
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: 'Y'
+      SA_PASSWORD: YourStrong@Password1
+      MSSQL_PID: Developer
+    ports:
+      - '1433:1433'
+    volumes:
+      - mssql-data:/var/opt/mssql
+    healthcheck:
+      test: /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P YourStrong@Password1 -Q "SELECT 1" || exit 1
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    networks:
+      - custody-net
+
+  # ---- RabbitMQ ----
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    ports:
+      - '5672:5672'
+      - '15672:15672'   # Management UI: http://localhost:15672 (guest/guest)
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    networks:
+      - custody-net
+
+volumes:
+  mssql-data:
+  rabbitmq-data:
+
+networks:
+  custody-net:
+    driver: bridge

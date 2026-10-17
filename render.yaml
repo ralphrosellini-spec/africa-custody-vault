@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: africa-custody-vault
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: development
+      - key: HMAC_SECRET
+        value: dev-only-secret-replace-in-production-min-64-chars-use-random-value-32charsmin
+      - key: AZURE_KEY_VAULT_URL
+        value: https://dev-vault.vault.azure.net
+      - key: RABBITMQ_URL
+        value: amqp://guest:guest@localhost:5672
+      - key: SWEEP_THRESHOLD_USD
+        value: "50"
+      - key: RATE_LIMIT_WINDOW_MS
+        value: "60000"
+      - key: RATE_LIMIT_MAX_REQUESTS
+        value: "100"
