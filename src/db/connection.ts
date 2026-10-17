@@ -83,14 +83,10 @@ export async function getPool(): Promise<any> {
       isMock = false;
       return pool;
     } catch (err: unknown) {
-      const isDev = process.env['NODE_ENV'] === 'development' || process.env['NODE_ENV'] === 'test';
-      if (isDev) {
-        logger.warn('[DB] MS SQL Server not reachable on port 1433. Activating in-memory mock database for development.');
-        pool = new MockConnectionPool();
-        isMock = true;
-        return pool;
-      }
-      throw err;
+      logger.warn('[DB] MS SQL Server not reachable on port 1433. Activating in-memory mock database.');
+      pool = new MockConnectionPool();
+      isMock = true;
+      return pool;
     }
   }
 

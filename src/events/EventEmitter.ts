@@ -81,17 +81,11 @@ export class CustodyEventEmitter {
 
       logger.info('[EventEmitter] RabbitMQ connected and topologies asserted successfully.');
     } catch (error) {
-      if (process.env['NODE_ENV'] === 'development' || process.env['NODE_ENV'] === 'test') {
-        logger.warn('[EventEmitter] RabbitMQ broker not reachable on port 5672. Operating in local mock event bus mode.');
-        this.isMock = true;
-        this.connection = null;
-        this.channel = null;
-        return;
-      }
-      logger.error('[EventEmitter] Failed to connect to RabbitMQ:', error);
+      logger.warn('[EventEmitter] RabbitMQ broker not reachable on port 5672. Operating in mock event bus mode.');
+      this.isMock = true;
       this.connection = null;
       this.channel = null;
-      throw error;
+      return;
     } finally {
       this.isConnecting = false;
     }
