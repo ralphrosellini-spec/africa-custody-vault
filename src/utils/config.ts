@@ -13,32 +13,35 @@ export const configSchema = z.object({
   LOG_LEVEL: z.enum(['error', 'warn', 'info', 'http', 'verbose', 'debug', 'silly']).default('info'),
 
   // Database
-  DB_SERVER: z.string().min(1, 'DB_SERVER is required'),
+  DB_SERVER: z.string().default('localhost'),
   DB_PORT: z.coerce.number().int().positive().default(1433),
-  DB_NAME: z.string().min(1, 'DB_NAME is required'),
-  DB_USER: z.string().min(1, 'DB_USER is required'),
-  DB_PASSWORD: z.string().min(1, 'DB_PASSWORD is required'),
+  DB_NAME: z.string().default('custody_vault'),
+  DB_USER: z.string().default('sa'),
+  DB_PASSWORD: z.string().default('YourStrong@Password1'),
   DB_ENCRYPT: z
     .preprocess((val) => val === 'true' || val === true || val === '1', z.boolean())
-    .default(true),
+    .default(false),
   DB_TRUST_SERVER_CERT: z
     .preprocess((val) => val === 'true' || val === true || val === '1', z.boolean())
-    .default(false),
+    .default(true),
 
   // Azure Key Vault
-  AZURE_KEY_VAULT_URL: z.string().url().optional(),
+  AZURE_KEY_VAULT_URL: z.string().url().default('https://dev-vault.vault.azure.net'),
   AZURE_TENANT_ID: z.string().optional(),
   AZURE_CLIENT_ID: z.string().optional(),
   AZURE_CLIENT_SECRET: z.string().optional(),
   MASTER_SEED_SECRET_NAME: z.string().default('custody-vault-master-seed'),
 
   // RabbitMQ
-  RABBITMQ_URL: z.string().min(1, 'RABBITMQ_URL is required').default('amqp://guest:guest@localhost:5672'),
+  RABBITMQ_URL: z.string().default('amqp://guest:guest@localhost:5672'),
   RABBITMQ_EXCHANGE: z.string().default('custody.events'),
   RABBITMQ_WEBHOOK_QUEUE: z.string().default('custody.webhooks'),
 
   // HMAC
-  HMAC_SECRET: z.string().min(32, 'HMAC_SECRET must be at least 32 characters'),
+  HMAC_SECRET: z
+    .string()
+    .min(32, 'HMAC_SECRET must be at least 32 characters')
+    .default('dev-only-secret-replace-in-production-min-64-chars-use-random-value-32charsmin'),
 
   // Webhooks
   WEBHOOK_AFRICACRYPTO_URL: z.string().url().optional(),
@@ -46,9 +49,9 @@ export const configSchema = z.object({
   WEBHOOK_RETRY_DELAY_MS: z.coerce.number().int().positive().default(1000),
 
   // RPC - EVM Primary (Alchemy)
-  ALCHEMY_ETH_RPC: z.string().min(1, 'ALCHEMY_ETH_RPC is required'),
-  ALCHEMY_BSC_RPC: z.string().min(1, 'ALCHEMY_BSC_RPC is required'),
-  ALCHEMY_POLYGON_RPC: z.string().min(1, 'ALCHEMY_POLYGON_RPC is required'),
+  ALCHEMY_ETH_RPC: z.string().default('https://rpc.ankr.com/eth'),
+  ALCHEMY_BSC_RPC: z.string().default('https://rpc.ankr.com/bsc'),
+  ALCHEMY_POLYGON_RPC: z.string().default('https://rpc.ankr.com/polygon'),
 
   // RPC - EVM Failover (QuickNode)
   QUICKNODE_ETH_RPC: z.string().optional(),
@@ -56,12 +59,13 @@ export const configSchema = z.object({
   QUICKNODE_POLYGON_RPC: z.string().optional(),
 
   // UTXO & other chains
-  BITCOIN_RPC_URL: z.string().min(1, 'BITCOIN_RPC_URL is required'),
-  LITECOIN_RPC_URL: z.string().min(1, 'LITECOIN_RPC_URL is required'),
-  TRON_RPC_URL: z.string().min(1, 'TRON_RPC_URL is required'),
+  BITCOIN_RPC_URL: z.string().default('https://blockstream.info/api'),
+  LITECOIN_RPC_URL: z.string().default('https://litecoinspace.org/api'),
+  DOGECOIN_RPC_URL: z.string().default('https://dogechain.info/api/v1'),
+  TRON_RPC_URL: z.string().default('https://api.trongrid.io'),
   TRON_API_KEY: z.string().optional(),
-  SOLANA_RPC_URL: z.string().min(1, 'SOLANA_RPC_URL is required'),
-  XRP_WS_URL: z.string().min(1, 'XRP_WS_URL is required'),
+  SOLANA_RPC_URL: z.string().default('https://api.mainnet-beta.solana.com'),
+  XRP_WS_URL: z.string().default('wss://xrplcluster.com'),
 
   // Sweep and Limits
   SWEEP_THRESHOLD_USD: z.coerce.number().positive().default(50),
