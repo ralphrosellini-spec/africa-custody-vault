@@ -33,6 +33,9 @@ const config: Config = {
   },
   verbose: true,
   testTimeout: 30000,
+  transformIgnorePatterns: [
+    '/node_modules/(?!(@solana|rpc-websockets|@project-serum|superstruct|jayson|bs58|bs64|borsh|eventemitter3|buffer|bn.js|uuid)/)',
+  ],
 };
 
 export default config;

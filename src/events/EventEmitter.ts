@@ -120,12 +120,40 @@ export class CustodyEventEmitter {
     return createHmac('sha256', secret).update(payload).digest('hex');
   }
 
+  private recentEvents: CustodyVaultEvent[] = [];
+
+  /**
+   * Return recent emitted events (up to 50) for monitoring and audits.
+   */
+  public getRecentEvents(): CustodyVaultEvent[] {
+    return [...this.recentEvents];
+  }
+
   /**
    * Create signed envelope and publish event to the RabbitMQ exchange with persistent delivery mode.
    */
   public async emit<T>(eventType: EventType, data: T): Promise<void> {
+    const eventId = uuidv4();
+    const timestamp = new Date().toISOString();
+    const payloadString = JSON.stringify(data);
+    const signature = this.generateHmacSignature(`${timestamp}.${eventId}.${eventType}.${payloadString}`);
+
+    const envelope: CustodyVaultEvent<T> = {
+      eventId,
+      eventType,
+      timestamp,
+      signature: `sha256=${signature}`,
+      data,
+    };
+
+    this.recentEvents.unshift(envelope as CustodyVaultEvent);
+    if (this.recentEvents.length > 50) this.recentEvents.pop();
+
     if (this.isMock) {
-      logger.info(`[EventEmitter:Mock] Emitted event [${eventType}]`, { data });
+      logger.info(`[EventEmitter:Mock] Emitted event [${eventType}] ID: ${eventId}`, { data });
+      if (config.WEBHOOK_AFRICACRYPTO_URL) {
+        void this.deliverDirectWebhook(envelope as CustodyVaultEvent);
+      }
       return;
     }
 
@@ -142,19 +170,6 @@ export class CustodyEventEmitter {
     if (!this.channel) {
       throw new Error(`[EventEmitter] Channel unavailable after connect. Event [${eventType}] dropped.`);
     }
-
-    const eventId = uuidv4();
-    const timestamp = new Date().toISOString();
-    const payloadString = JSON.stringify(data);
-    const signature = this.generateHmacSignature(`${timestamp}.${eventId}.${eventType}.${payloadString}`);
-
-    const envelope: CustodyVaultEvent<T> = {
-      eventId,
-      eventType,
-      timestamp,
-      signature: `sha256=${signature}`,
-      data,
-    };
 
     const routingKey = `custody.event.${eventType.toLowerCase().replace(/_/g, '.')}`;
     const buffer = Buffer.from(JSON.stringify(envelope));
@@ -294,6 +309,28 @@ export class CustodyEventEmitter {
       },
       { noAck: false }
     );
+  }
+
+  private async deliverDirectWebhook(envelope: CustodyVaultEvent): Promise<void> {
+    const webhookUrl = config.WEBHOOK_AFRICACRYPTO_URL;
+    if (!webhookUrl) return;
+
+    try {
+      const response = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Vault-Event-Id': envelope.eventId,
+          'X-Vault-Event-Type': envelope.eventType,
+          'X-Vault-Signature': envelope.signature,
+          'X-Vault-Timestamp': envelope.timestamp,
+        },
+        body: JSON.stringify(envelope),
+      });
+      logger.info(`[EventEmitter] Direct webhook delivered [${envelope.eventType}]: HTTP status ${response.status}`);
+    } catch (err) {
+      logger.warn(`[EventEmitter] Direct webhook delivery attempted (offline/unreachable): ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 }
 

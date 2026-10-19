@@ -386,7 +386,57 @@ export function getDashboardHtml(): string {
       </div>
     </div>
 
-    <!-- Live Health & Diagnostic Probe -->
+    <!-- Phase 2: Deposit Flow & Sweeping Engine -->
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title">📥 Phase 2: On-Chain Deposit & Auto-Sweep Simulator</h2>
+        <span style="font-size:0.85rem; color:var(--text-muted);">Simulate incoming deposits, confirmation tracking, and auto-sweeping to Omnibus</span>
+      </div>
+
+      <div class="form-group">
+        <input type="text" id="depUserId" class="input-field" value="manager-review-001" placeholder="User ID" style="max-width:180px;">
+        <select id="depNetwork" class="input-field" style="max-width:140px; cursor:pointer;">
+          <option value="ETH">ETH (Ethereum)</option>
+          <option value="BSC">BSC (BNB Chain)</option>
+          <option value="POLYGON">POLYGON</option>
+          <option value="BTC">BTC (Bitcoin)</option>
+          <option value="SOL">SOL (Solana)</option>
+          <option value="TRX">TRX (Tron)</option>
+        </select>
+        <input type="text" id="depAmount" class="input-field" value="120.00" placeholder="Amount (e.g. 120.00)" style="max-width:160px;">
+        <button id="simulateDepositBtn" class="btn" style="background:linear-gradient(135deg, #10b981, #059669);">
+          <span>⚡ Simulate Deposit & Auto-Sweep</span>
+        </button>
+      </div>
+
+      <div id="depLoader" style="display:none; color:var(--success); font-size:0.9rem; align-items:center; gap:0.5rem;">
+        <span>Processing deposit confirmation lifecycle and evaluating sweep threshold...</span>
+      </div>
+
+      <!-- Deposit Flow Timeline Result -->
+      <div id="depositResultPanel" style="display:none; background:#0f172a; border:1px solid #1e293b; border-radius:10px; padding:1.25rem;">
+        <h3 style="font-size:0.95rem; color:#38bdf8; margin-bottom:0.75rem; display:flex; align-items:center; gap:0.5rem;">
+          <span>✅ Deposit Lifecycle & Sweep Successfully Processed</span>
+        </h3>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:1rem; font-size:0.85rem;">
+          <div><strong style="color:var(--text-muted);">TxHash:</strong> <div id="resTxHash" class="mono-address" style="font-size:0.78rem;"></div></div>
+          <div><strong style="color:var(--text-muted);">Deposit Vault:</strong> <div id="resAddress" class="mono-address" style="font-size:0.78rem;"></div></div>
+          <div><strong style="color:var(--text-muted);">Confirmations:</strong> <div id="resConfs" style="color:var(--success); font-weight:700;"></div></div>
+          <div><strong style="color:var(--text-muted);">Omnibus Sweep:</strong> <div id="resSweep" style="color:#06b6d4; font-weight:700;"></div></div>
+        </div>
+      </div>
+
+      <!-- Live Events Stream -->
+      <div style="margin-top:0.5rem;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+          <h4 style="font-size:0.88rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.05em;">Live Event Bus & Webhook Dispatch Feed</h4>
+          <button id="refreshEventsBtn" class="copy-btn">🔄 Refresh Feed</button>
+        </div>
+        <div id="eventsList" style="display:flex; flex-direction:column; gap:0.5rem;">
+          <div style="color:var(--text-muted); font-size:0.82rem;">No recent events emitted yet. Click "Simulate Deposit" above to test.</div>
+        </div>
+      </div>
+    </div>
     <div class="card">
       <div class="card-header">
         <h2 class="card-title">🔍 Live API Diagnostics & Health</h2>
@@ -536,6 +586,89 @@ export function getDashboardHtml(): string {
         healthOutput.textContent = 'Error: ' + err.message;
       }
     });
+
+    const simulateDepositBtn = document.getElementById('simulateDepositBtn');
+    const depUserId = document.getElementById('depUserId');
+    const depNetwork = document.getElementById('depNetwork');
+    const depAmount = document.getElementById('depAmount');
+    const depLoader = document.getElementById('depLoader');
+    const depositResultPanel = document.getElementById('depositResultPanel');
+    const resTxHash = document.getElementById('resTxHash');
+    const resAddress = document.getElementById('resAddress');
+    const resConfs = document.getElementById('resConfs');
+    const resSweep = document.getElementById('resSweep');
+    const eventsList = document.getElementById('eventsList');
+    const refreshEventsBtn = document.getElementById('refreshEventsBtn');
+
+    async function loadEvents() {
+      try {
+        const res = await fetch('/demo/events');
+        const json = await res.json();
+        if (json.events && json.events.length > 0) {
+          eventsList.innerHTML = '';
+          json.events.slice(0, 5).forEach(ev => {
+            const div = document.createElement('div');
+            div.style.background = '#0a0f1d';
+            div.style.border = '1px solid #1e293b';
+            div.style.borderRadius = '6px';
+            div.style.padding = '0.6rem 0.9rem';
+            div.style.fontSize = '0.82rem';
+            div.style.display = 'flex';
+            div.style.justifyContent = 'space-between';
+            div.style.alignItems = 'center';
+            div.style.flexWrap = 'wrap';
+            div.style.gap = '0.5rem';
+            div.innerHTML = \`
+              <div>
+                <span style="background:rgba(6, 182, 212, 0.15); color:#06b6d4; padding:0.15rem 0.4rem; border-radius:4px; font-weight:700; font-size:0.75rem;">\${ev.eventType}</span>
+                <span style="color:#94a3b8; font-family:var(--font-mono); margin-left:0.5rem;">\${ev.eventId.slice(0, 8)}...</span>
+              </div>
+              <div style="color:#64748b; font-size:0.75rem;">\${new Date(ev.timestamp).toLocaleTimeString()}</div>
+              <div style="font-family:var(--font-mono); color:#10b981; font-size:0.75rem;">\${ev.signature ? ev.signature.slice(0, 18) + '...' : ''}</div>
+            \`;
+            eventsList.appendChild(div);
+          });
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    refreshEventsBtn.addEventListener('click', loadEvents);
+
+    simulateDepositBtn.addEventListener('click', async () => {
+      depLoader.style.display = 'flex';
+      simulateDepositBtn.disabled = true;
+      try {
+        const res = await fetch('/demo/deposit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            externalUserId: depUserId.value.trim() || 'manager-review-001',
+            network: depNetwork.value,
+            amount: depAmount.value.trim() || '120.00'
+          })
+        });
+        const json = await res.json();
+        if (json.success && json.data) {
+          depositResultPanel.style.display = 'block';
+          resTxHash.textContent = json.data.deposit ? json.data.deposit.txHash : 'N/A';
+          resAddress.textContent = json.data.walletAddress || 'N/A';
+          resConfs.textContent = \`\${json.data.requiredConfirmations}/\${json.data.requiredConfirmations} (COMPLETED)\`;
+          resSweep.textContent = json.data.sweeps && json.data.sweeps.length > 0 ? 'Swept to Omnibus Vault' : 'Threshold Evaluated';
+          loadEvents();
+        } else {
+          alert('Error: ' + (json.error || 'Failed to simulate deposit'));
+        }
+      } catch (err) {
+        alert('Network error: ' + err.message);
+      } finally {
+        depLoader.style.display = 'none';
+        simulateDepositBtn.disabled = false;
+      }
+    });
+
+    loadEvents();
 
     // Auto trigger on initial load for preview
     deriveBtn.click();

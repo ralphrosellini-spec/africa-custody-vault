@@ -8,10 +8,14 @@ import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
 import apiRouter from './api/index.js';
 import { errorHandler, notFoundHandler } from './api/middleware/errorHandler.js';
-import { API_PREFIX } from './utils/constants.js';
+import { API_PREFIX, REQUIRED_CONFIRMATIONS } from './utils/constants.js';
 import { logger } from './utils/logger.js';
 import { getDashboardHtml } from './views/dashboard.js';
 import { WalletService } from './services/WalletService.js';
+import { DepositService } from './services/DepositService.js';
+import { SweepService } from './services/SweepService.js';
+import { eventEmitter } from './events/EventEmitter.js';
+import { Network, Asset } from './types/index.js';
 
 export function createApp(): express.Application {
   const app = express();
@@ -73,6 +77,9 @@ export function createApp(): express.Application {
 
   // ---- Demo endpoint for live interactive address derivation ----
   const demoWalletService = new WalletService();
+  const demoDepositService = new DepositService();
+  const demoSweepService = new SweepService();
+
   app.post('/demo/derive', async (req: Request, res: Response) => {
     try {
       const extId = (req.body?.externalUserId as string) || 'manager-demo';
@@ -81,6 +88,62 @@ export function createApp(): express.Application {
     } catch (err) {
       res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
     }
+  });
+
+  // ---- Demo endpoint for deposit & auto-sweep simulation ----
+  app.post('/demo/deposit', async (req: Request, res: Response) => {
+    try {
+      const extId = (req.body?.externalUserId as string) || 'manager-demo';
+      const network = (req.body?.network as Network) || Network.ETH;
+      const asset = (req.body?.asset as Asset) || (network as unknown as Asset);
+      const amount = (req.body?.amount as string) || '100.00';
+
+      let wallet = await demoWalletService.getUserWalletForNetwork(extId, network);
+      if (!wallet) {
+        await demoWalletService.createUserWallets(extId);
+        wallet = await demoWalletService.getUserWalletForNetwork(extId, network);
+      }
+
+      if (!wallet) throw new Error('Could not derive wallet for user');
+
+      const txHash = `0xdep_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+      await demoDepositService.recordDetectedDeposit({
+        walletId: wallet.id,
+        txHash,
+        asset,
+        network,
+        amount,
+      });
+
+      const requiredConfs = REQUIRED_CONFIRMATIONS[network] ?? 12;
+      await demoDepositService.updateConfirmations(txHash, requiredConfs, network);
+      await demoSweepService.checkAndSweep(wallet.id, network);
+
+      const deposit = await demoDepositService.getTransactionByHash(txHash);
+      const transfers = await demoSweepService.getInternalTransfers();
+      const events = eventEmitter.getRecentEvents();
+
+      res.json({
+        success: true,
+        data: {
+          deposit,
+          walletAddress: wallet.address,
+          requiredConfirmations: requiredConfs,
+          recentEvents: events.slice(0, 5),
+          sweeps: transfers.slice(0, 5),
+        },
+      });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // ---- Demo endpoint for recent custody events ----
+  app.get('/demo/events', (_req: Request, res: Response) => {
+    res.json({
+      success: true,
+      events: eventEmitter.getRecentEvents(),
+    });
   });
 
   // ---- Health check (no auth required) ----

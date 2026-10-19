@@ -142,7 +142,7 @@ export class MockDatabase {
     }
 
     // ---- cv_users ----
-    if (upper.includes('CV_USERS') && !upper.includes('CV_WALLETS') && !upper.includes('CV_WITHDRAWALS')) {
+    if (upper.includes('CV_USERS') && !upper.includes('CV_WALLETS') && !upper.includes('CV_WITHDRAWALS') && !upper.includes('CV_DEPOSITS')) {
       if (upper.startsWith('SELECT')) {
         const extId = (inputs['externalUserId'] ?? inputs['external_user_id']) as string;
         const matched = this.users.filter((u) => u['external_user_id'] === extId);
@@ -176,7 +176,7 @@ export class MockDatabase {
     }
 
     // ---- cv_wallets ----
-    if (upper.includes('CV_WALLETS')) {
+    if (upper.includes('CV_WALLETS') && !upper.includes('CV_DEPOSITS')) {
       if (upper.startsWith('SELECT')) {
         const userId = inputs['userId'] as string | undefined;
         const network = inputs['network'] as string | undefined;
@@ -242,14 +242,15 @@ export class MockDatabase {
       }
       if (upper.startsWith('INSERT')) {
         const newEvent: MockRow = {
-          id: uuidv4(),
-          user_id: inputs['user_id'],
-          event_type: inputs['event_type'],
+          id: inputs['id'] ?? uuidv4(),
+          user_id: inputs['user_id'] ?? inputs['userId'],
+          wallet_id: inputs['wallet_id'] ?? inputs['walletId'],
+          event_type: inputs['event_type'] ?? inputs['eventType'],
           asset: inputs['asset'],
           network: inputs['network'],
           amount: String(inputs['amount']),
-          reference_id: inputs['reference_id'],
-          reference_type: inputs['reference_type'],
+          reference_id: inputs['reference_id'] ?? inputs['referenceId'],
+          reference_type: inputs['reference_type'] ?? inputs['referenceType'] ?? 'deposit',
           created_at: new Date(),
         };
         this.ledgerEvents.push(newEvent);
@@ -320,12 +321,131 @@ export class MockDatabase {
       }
     }
 
+    // ---- cv_internal_transfers ----
+    if (upper.includes('CV_INTERNAL_TRANSFERS')) {
+      if (upper.startsWith('INSERT')) {
+        const t: MockRow = {
+          id: inputs['id'] ?? uuidv4(),
+          transfer_type: inputs['transfer_type'],
+          asset: inputs['asset'],
+          network: inputs['network'],
+          from_address: inputs['from_address'],
+          to_address: inputs['to_address'],
+          amount: String(inputs['amount']),
+          tx_hash: inputs['tx_hash'],
+          status: inputs['status'] ?? 'COMPLETED',
+          created_at: new Date(),
+          completed_at: new Date(),
+        };
+        this.internalTransfers.push(t);
+        return { recordset: [t], rowsAffected: [1] };
+      }
+      if (upper.startsWith('SELECT')) {
+        return { recordset: this.internalTransfers, rowsAffected: [this.internalTransfers.length] };
+      }
+    }
+
     // ---- cv_deposits ----
     if (upper.includes('CV_DEPOSITS')) {
       if (upper.startsWith('SELECT')) {
-        const txHash = inputs['txHash'] ?? inputs['tx_hash'];
-        const matched = this.deposits.filter((d) => d['tx_hash'] === txHash);
-        return { recordset: matched, rowsAffected: [matched.length] };
+        const txHash = (inputs['txHash'] ?? inputs['tx_hash']) as string | undefined;
+        const depositId = (inputs['depositId'] ?? inputs['id']) as string | undefined;
+        const extId = inputs['externalUserId'] as string | undefined;
+        const walletId = (inputs['walletId'] ?? inputs['wallet_id']) as string | undefined;
+        const network = inputs['network'] as string | undefined;
+
+        if (txHash) {
+          const matched = this.deposits.filter((d) => d['tx_hash'] === txHash);
+          return {
+            recordset: matched.map((d) => {
+              const wallet = this.wallets.find((w) => w['id'] === d['wallet_id']);
+              const user = wallet ? this.users.find((u) => u['id'] === wallet['user_id']) : undefined;
+              return {
+                ...d,
+                id: d['id'],
+                walletId: d['wallet_id'],
+                txHash: d['tx_hash'],
+                network: d['network'],
+                asset: d['asset'],
+                amount: d['amount'],
+                confirmations: d['confirmations'],
+                status: d['status'],
+                userId: user ? user['id'] : 'mock-user-id',
+                externalUserId: user ? user['external_user_id'] : 'mock-user',
+                createdAt: d['created_at'],
+                confirmedAt: d['confirmed_at'],
+                updatedAt: d['updated_at'],
+              };
+            }),
+            rowsAffected: [matched.length],
+          };
+        }
+
+        if (depositId) {
+          const matched = this.deposits.filter((d) => d['id'] === depositId);
+          return { recordset: matched, rowsAffected: [matched.length] };
+        }
+
+        if (extId) {
+          const user = this.users.find((u) => u['external_user_id'] === extId);
+          if (!user) return { recordset: [], rowsAffected: [0] };
+          const userWallets = this.wallets.filter((w) => w['user_id'] === user['id']);
+          const userWalletIds = new Set(userWallets.map((w) => w['id']));
+          const matched = this.deposits.filter((d) => userWalletIds.has(d['wallet_id']));
+          return {
+            recordset: matched.map((d) => ({
+              ...d,
+              id: d['id'],
+              walletId: d['wallet_id'],
+              txHash: d['tx_hash'],
+              network: d['network'],
+              asset: d['asset'],
+              amount: d['amount'],
+              confirmations: d['confirmations'],
+              status: d['status'],
+              createdAt: d['created_at'],
+              confirmedAt: d['confirmed_at'],
+              updatedAt: d['updated_at'],
+            })),
+            rowsAffected: [matched.length],
+          };
+        }
+
+        if (walletId) {
+          if (upper.includes('SUM')) {
+            const completed = this.deposits.filter((d) => d['wallet_id'] === walletId && d['status'] === 'COMPLETED');
+            const sum = completed.reduce((acc, d) => acc + parseFloat(String(d['amount'] || 0)), 0);
+            return { recordset: [{ total: sum.toString() }], rowsAffected: [1] };
+          }
+          const matched = this.deposits.filter((d) => d['wallet_id'] === walletId);
+          return { recordset: matched, rowsAffected: [matched.length] };
+        }
+
+        if (network) {
+          let matched = this.deposits.filter((d) => d['network'] === network);
+          if (upper.includes('STATUS IN')) {
+            matched = matched.filter((d) => ['UNCONFIRMED', 'CONFIRMING', 'PENDING'].includes(String(d['status'])));
+          }
+          return {
+            recordset: matched.map((d) => ({
+              ...d,
+              id: d['id'],
+              walletId: d['wallet_id'],
+              txHash: d['tx_hash'],
+              network: d['network'],
+              asset: d['asset'],
+              amount: d['amount'],
+              confirmations: d['confirmations'],
+              status: d['status'],
+              createdAt: d['created_at'],
+              confirmedAt: d['confirmed_at'],
+              updatedAt: d['updated_at'],
+            })),
+            rowsAffected: [matched.length],
+          };
+        }
+
+        return { recordset: this.deposits, rowsAffected: [this.deposits.length] };
       }
       if (upper.startsWith('INSERT')) {
         const d: MockRow = {
@@ -346,11 +466,23 @@ export class MockDatabase {
         return { recordset: [d], rowsAffected: [1] };
       }
       if (upper.startsWith('UPDATE')) {
-        const txHash = inputs['txHash'] ?? inputs['tx_hash'];
-        const d = this.deposits.find((x) => x['tx_hash'] === txHash);
+        const txHash = (inputs['txHash'] ?? inputs['tx_hash']) as string | undefined;
+        const depositId = (inputs['depositId'] ?? inputs['id']) as string | undefined;
+        const d = this.deposits.find((x) => (txHash && x['tx_hash'] === txHash) || (depositId && x['id'] === depositId));
         if (d) {
           if (inputs['confirmations'] !== undefined) d['confirmations'] = inputs['confirmations'];
-          if (inputs['status']) d['status'] = inputs['status'];
+          let newStatus = inputs['status'] as string | undefined;
+          if (!newStatus) {
+            if (upper.includes("STATUS = 'FAILED'")) newStatus = 'FAILED';
+            else if (upper.includes("STATUS = 'COMPLETED'")) newStatus = 'COMPLETED';
+            else if (upper.includes("STATUS = 'CONFIRMING'")) newStatus = 'CONFIRMING';
+          }
+          if (newStatus) {
+            d['status'] = newStatus;
+            if (newStatus === 'COMPLETED') {
+              d['confirmed_at'] = new Date();
+            }
+          }
           d['updated_at'] = new Date();
         }
         return { recordset: [], rowsAffected: [1] };
