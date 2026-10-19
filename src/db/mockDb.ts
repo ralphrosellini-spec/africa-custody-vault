@@ -228,29 +228,81 @@ export class MockDatabase {
     // ---- cv_ledger_events ----
     if (upper.includes('CV_LEDGER_EVENTS')) {
       if (upper.startsWith('SELECT')) {
-        const asset = inputs['asset'] as string | undefined;
-        let sum = 0;
-        for (const ev of this.ledgerEvents) {
-          if (!asset || ev['asset'] === asset) {
-            sum += parseFloat(String(ev['amount']));
+        const userId = (inputs['userId'] ?? inputs['user_id']) as string | undefined;
+        const assetFilter = inputs['asset'] as string | undefined;
+        const networkFilter = inputs['network'] as string | undefined;
+
+        // Per-user balance grouped by asset+network (GROUP BY)
+        if (userId && upper.includes('GROUP BY')) {
+          let matching = this.ledgerEvents.filter((ev) => ev['user_id'] === userId);
+          if (assetFilter) matching = matching.filter((ev) => ev['asset'] === assetFilter);
+          if (networkFilter) matching = matching.filter((ev) => ev['network'] === networkFilter);
+          const groups: Record<string, { asset: string; network: string; sum: number }> = {};
+          for (const ev of matching) {
+            const key = `${String(ev['asset'])}::${String(ev['network'])}`;
+            if (!groups[key]) groups[key] = { asset: String(ev['asset']), network: String(ev['network']), sum: 0 };
+            groups[key]!.sum += parseFloat(String(ev['amount']));
           }
+          const recordset = Object.values(groups).map((g) => ({
+            asset: g.asset,
+            network: g.network,
+            balance: g.sum.toString(),
+            total: g.sum.toString(),
+          }));
+          return { recordset, rowsAffected: [recordset.length] };
         }
+
+        // Paginated audit trail for specific user (ORDER BY created_at DESC)
+        if (userId && upper.includes('ORDER BY')) {
+          const offset = Number(inputs['offset'] ?? 0);
+          const limit = Number(inputs['limit'] ?? 50);
+          let matching = this.ledgerEvents.filter((ev) => ev['user_id'] === userId);
+          if (assetFilter) matching = matching.filter((ev) => ev['asset'] === assetFilter);
+          if (networkFilter) matching = matching.filter((ev) => ev['network'] === networkFilter);
+          matching = matching.slice().sort((a, b) =>
+            new Date(String(b['created_at'])).getTime() - new Date(String(a['created_at'])).getTime()
+          );
+          return { recordset: matching.slice(offset, offset + limit), rowsAffected: [matching.length] };
+        }
+
+        // Global or per-user simple balance SUM (used by withdrawal balance check and sweep)
+        const asset = inputs['asset'] as string | undefined;
+        const network = inputs['network'] as string | undefined;
+        let events = this.ledgerEvents;
+        if (userId) events = events.filter((ev) => ev['user_id'] === userId);
+        if (asset) events = events.filter((ev) => ev['asset'] === asset);
+        if (network) events = events.filter((ev) => ev['network'] === network);
+        const sum = events.reduce((acc, ev) => acc + parseFloat(String(ev['amount'])), 0);
         return {
           recordset: [{ balance: sum.toString(), total: sum.toString() }],
           rowsAffected: [1],
         };
       }
       if (upper.startsWith('INSERT')) {
+        let eventType = inputs['event_type'] ?? inputs['eventType'];
+        if (!eventType) {
+          if (upper.includes("'WITHDRAWAL_REFUND'")) eventType = 'WITHDRAWAL_REFUND';
+          else if (upper.includes("'WITHDRAWAL_COMPLETED'")) eventType = 'WITHDRAWAL_COMPLETED';
+          else if (upper.includes("'WITHDRAWAL_DEBIT'")) eventType = 'WITHDRAWAL_DEBIT';
+          else if (upper.includes("'DEPOSIT_CONFIRMED'")) eventType = 'DEPOSIT_CONFIRMED';
+        }
+        let refType = inputs['reference_type'] ?? inputs['referenceType'];
+        if (!refType) {
+          if (upper.includes("'withdrawal_refund'")) refType = 'withdrawal_refund';
+          else if (upper.includes("'withdrawal_completed'")) refType = 'withdrawal_completed';
+          else if (upper.includes("'withdrawal'")) refType = 'withdrawal';
+          else refType = 'deposit';
+        }
         const newEvent: MockRow = {
           id: inputs['id'] ?? uuidv4(),
           user_id: inputs['user_id'] ?? inputs['userId'],
           wallet_id: inputs['wallet_id'] ?? inputs['walletId'],
-          event_type: inputs['event_type'] ?? inputs['eventType'],
+          event_type: eventType,
           asset: inputs['asset'],
           network: inputs['network'],
           amount: String(inputs['amount']),
           reference_id: inputs['reference_id'] ?? inputs['referenceId'],
-          reference_type: inputs['reference_type'] ?? inputs['referenceType'] ?? 'deposit',
+          reference_type: refType,
           created_at: new Date(),
         };
         this.ledgerEvents.push(newEvent);
@@ -263,6 +315,24 @@ export class MockDatabase {
       if (upper.startsWith('SELECT')) {
         const id = inputs['id'] as string | undefined;
         const network = inputs['network'] as string | undefined;
+        const userId = inputs['userId'] as string | undefined;
+
+        if (userId) {
+          const offset = Number(inputs['offset'] ?? 0);
+          const limit = Number(inputs['limit'] ?? 20);
+          let res = this.withdrawals.filter((x) => x['user_id'] === userId);
+          res = res.slice().sort((a, b) =>
+            new Date(String(b['requested_at'])).getTime() - new Date(String(a['requested_at'])).getTime()
+          );
+          const paged = res.slice(offset, offset + limit);
+          return {
+            recordset: paged.map((w) => {
+              const user = this.users.find((u) => u['id'] === w['user_id']);
+              return { ...w, external_user_id: user ? user['external_user_id'] : 'test-user' };
+            }),
+            rowsAffected: [paged.length],
+          };
+        }
 
         if (id) {
           const w = this.withdrawals.find((x) => x['id'] === id);
@@ -307,15 +377,21 @@ export class MockDatabase {
         return { recordset: [w], rowsAffected: [1] };
       }
       if (upper.startsWith('UPDATE')) {
-        const id = inputs['id'] as string;
+        const id = (inputs['id'] ?? inputs['withdrawalId']) as string;
         const w = this.withdrawals.find((x) => x['id'] === id);
         if (w) {
-          if (inputs['status']) w['status'] = inputs['status'];
+          let newStatus = inputs['status'] as string | undefined;
+          if (!newStatus) {
+            if (upper.includes("STATUS = 'BROADCASTING'")) newStatus = 'BROADCASTING';
+            else if (upper.includes("STATUS = 'COMPLETED'")) newStatus = 'COMPLETED';
+            else if (upper.includes("STATUS = 'FAILED'")) newStatus = 'FAILED';
+          }
+          if (newStatus) {
+            w['status'] = newStatus;
+            if (newStatus === 'COMPLETED' || newStatus === 'FAILED') w['completed_at'] = new Date();
+          }
           if (inputs['tx_hash']) w['tx_hash'] = inputs['tx_hash'];
           if (inputs['reason']) w['failure_reason'] = inputs['reason'];
-          if (inputs['status'] === 'COMPLETED' || inputs['status'] === 'FAILED') {
-            w['completed_at'] = new Date();
-          }
         }
         return { recordset: [], rowsAffected: [1] };
       }

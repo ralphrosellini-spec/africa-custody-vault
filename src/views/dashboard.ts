@@ -437,6 +437,57 @@ export function getDashboardHtml(): string {
         </div>
       </div>
     </div>
+
+    <!-- Phase 3: Withdrawal Pipeline & Balance Ledger -->
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title">💸 Phase 3 — Withdrawal Pipeline &amp; Balance Ledger</h2>
+        <span style="font-size:0.78rem; background:#7c3aed22; color:#a78bfa; border:1px solid #7c3aed44; padding:0.25rem 0.75rem; border-radius:999px;">ATOMIC DEBIT + LEDGER</span>
+      </div>
+      <p style="font-size:0.88rem; color:var(--text-muted); margin-bottom:1.25rem;">Simulate a full withdrawal: Omnibus balance check → atomic SQL debit → sign &amp; broadcast → ledger append. Then query the user's live balance ledger.</p>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.25rem; margin-bottom:1.25rem;">
+        <div>
+          <label style="display:block; font-size:0.82rem; color:var(--text-muted); margin-bottom:0.4rem;">External User ID</label>
+          <input id="wdUserIdInput" type="text" value="manager-demo" style="width:100%; background:#0f172a; border:1px solid #334155; color:#f1f5f9; padding:0.6rem 0.8rem; border-radius:6px; font-size:0.88rem;" />
+        </div>
+        <div>
+          <label style="display:block; font-size:0.82rem; color:var(--text-muted); margin-bottom:0.4rem;">Gross Amount</label>
+          <input id="wdAmountInput" type="text" value="10" style="width:100%; background:#0f172a; border:1px solid #334155; color:#f1f5f9; padding:0.6rem 0.8rem; border-radius:6px; font-size:0.88rem;" />
+        </div>
+        <div>
+          <label style="display:block; font-size:0.82rem; color:var(--text-muted); margin-bottom:0.4rem;">Asset</label>
+          <select id="wdAssetSelect" style="width:100%; background:#0f172a; border:1px solid #334155; color:#f1f5f9; padding:0.6rem 0.8rem; border-radius:6px; font-size:0.88rem;">
+            <option value="ETH">ETH</option>
+            <option value="BTC">BTC</option>
+            <option value="SOL">SOL</option>
+            <option value="USDT_ERC20">USDT_ERC20</option>
+          </select>
+        </div>
+        <div>
+          <label style="display:block; font-size:0.82rem; color:var(--text-muted); margin-bottom:0.4rem;">Network</label>
+          <select id="wdNetworkSelect" style="width:100%; background:#0f172a; border:1px solid #334155; color:#f1f5f9; padding:0.6rem 0.8rem; border-radius:6px; font-size:0.88rem;">
+            <option value="ETH">ETH</option>
+            <option value="BTC">BTC</option>
+            <option value="SOL">SOL</option>
+            <option value="BSC">BSC</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:flex; gap:0.75rem; margin-bottom:1.25rem; flex-wrap:wrap;">
+        <button id="submitWithdrawalBtn" class="btn">⚡ Submit Withdrawal</button>
+        <button id="checkBalanceBtn" class="btn btn-secondary">📊 Check Balance</button>
+        <span id="wdLoader" style="display:none; align-self:center; font-size:0.82rem; color:var(--text-muted);">⏳ Processing...</span>
+      </div>
+      <div id="wdResult" style="display:none;">
+        <h4 style="font-size:0.85rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.75rem;">Withdrawal Result</h4>
+        <pre id="wdResultPre"></pre>
+      </div>
+      <div id="balanceResult" style="display:none; margin-top:1rem;">
+        <h4 style="font-size:0.85rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.75rem;">Balance Ledger</h4>
+        <pre id="balanceResultPre"></pre>
+      </div>
+    </div>
+
     <div class="card">
       <div class="card-header">
         <h2 class="card-title">🔍 Live API Diagnostics & Health</h2>
@@ -668,7 +719,62 @@ export function getDashboardHtml(): string {
       }
     });
 
-    loadEvents();
+    // Phase 3 — Withdrawal & Balance handlers
+    const submitWithdrawalBtn = document.getElementById('submitWithdrawalBtn');
+    const checkBalanceBtn = document.getElementById('checkBalanceBtn');
+    const wdLoader = document.getElementById('wdLoader');
+    const wdResult = document.getElementById('wdResult');
+    const wdResultPre = document.getElementById('wdResultPre');
+    const balanceResult = document.getElementById('balanceResult');
+    const balanceResultPre = document.getElementById('balanceResultPre');
+
+    submitWithdrawalBtn.addEventListener('click', async () => {
+      const extId = (document.getElementById('wdUserIdInput')).value.trim() || 'manager-demo';
+      const asset = (document.getElementById('wdAssetSelect')).value;
+      const network = (document.getElementById('wdNetworkSelect')).value;
+      const grossAmount = (document.getElementById('wdAmountInput')).value.trim() || '10';
+      wdLoader.style.display = 'inline';
+      submitWithdrawalBtn.disabled = true;
+      wdResult.style.display = 'none';
+      try {
+        const resp = await fetch('/demo/withdrawal', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ externalUserId: extId, asset, network, grossAmount }),
+        });
+        const json = await resp.json();
+        wdResult.style.display = 'block';
+        wdResultPre.textContent = JSON.stringify(json.data ?? json, null, 2);
+        if (!json.success) wdResultPre.style.color = '#ef4444';
+        else wdResultPre.style.color = '';
+      } catch (err) {
+        wdResult.style.display = 'block';
+        wdResultPre.style.color = '#ef4444';
+        wdResultPre.textContent = 'Network error: ' + err.message;
+      } finally {
+        wdLoader.style.display = 'none';
+        submitWithdrawalBtn.disabled = false;
+      }
+    });
+
+    checkBalanceBtn.addEventListener('click', async () => {
+      const extId = (document.getElementById('wdUserIdInput')).value.trim() || 'manager-demo';
+      wdLoader.style.display = 'inline';
+      checkBalanceBtn.disabled = true;
+      balanceResult.style.display = 'none';
+      try {
+        const resp = await fetch('/demo/balance?externalUserId=' + encodeURIComponent(extId));
+        const json = await resp.json();
+        balanceResult.style.display = 'block';
+        balanceResultPre.textContent = JSON.stringify(json.data ?? json, null, 2);
+      } catch (err) {
+        balanceResult.style.display = 'block';
+        balanceResultPre.textContent = 'Network error: ' + err.message;
+      } finally {
+        wdLoader.style.display = 'none';
+        checkBalanceBtn.disabled = false;
+      }
+    });
 
     // Auto trigger on initial load for preview
     deriveBtn.click();

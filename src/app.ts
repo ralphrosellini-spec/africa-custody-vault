@@ -146,6 +146,55 @@ export function createApp(): express.Application {
     });
   });
 
+  // ---- Demo endpoint for withdrawal simulation ----
+  app.post('/demo/withdrawal', async (req: Request, res: Response) => {
+    try {
+      const { WithdrawalService } = await import('./services/WithdrawalService.js');
+      const svc = new WithdrawalService();
+      const extId = (req.body?.externalUserId as string) || 'manager-demo';
+      const asset = (req.body?.asset as Asset) || Asset.ETH;
+      const network = (req.body?.network as Network) || Network.ETH;
+      const grossAmount = (req.body?.grossAmount as string) || '10';
+      const destinationAddress = (req.body?.destinationAddress as string) || '0xDemo000000000000000000000000000000000001';
+
+      // Ensure user has a wallet so balance ledger can be seeded
+      let wallet = await demoWalletService.getUserWalletForNetwork(extId, network);
+      if (!wallet) {
+        await demoWalletService.createUserWallets(extId);
+        wallet = await demoWalletService.getUserWalletForNetwork(extId, network);
+      }
+
+      const result = await svc.createWithdrawal({
+        externalUserId: extId,
+        asset,
+        network,
+        destinationAddress,
+        grossAmount,
+        requestorIp: req.ip ?? '127.0.0.1',
+        requestorApiKeyId: 'demo-api-key',
+      });
+
+      res.json({ success: true, data: result });
+    } catch (err) {
+      const status = (err as { statusCode?: number }).statusCode ?? 500;
+      res.status(status).json({ success: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // ---- Demo endpoint for balance query ----
+  app.get('/demo/balance', async (req: Request, res: Response) => {
+    try {
+      const { WithdrawalService } = await import('./services/WithdrawalService.js');
+      const svc = new WithdrawalService();
+      const extId = (req.query?.externalUserId as string) || 'manager-demo';
+      const balances = await svc.getUserBalance(extId);
+      const withdrawals = await svc.getWithdrawalsByUser(extId);
+      res.json({ success: true, data: { balances, recentWithdrawals: withdrawals.slice(0, 10) } });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
   // ---- Health check (no auth required) ----
   app.get('/health', (_req: Request, res: Response) => {
     res.json({

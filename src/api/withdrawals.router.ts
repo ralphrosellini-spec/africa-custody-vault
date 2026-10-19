@@ -14,6 +14,32 @@ import { WithdrawalRequest } from '../types/index.js';
 const router = Router();
 const withdrawalService = new WithdrawalService();
 
+/**
+ * GET /api/v1/withdrawals?externalUserId=xxx
+ * List withdrawals for a user (paginated).
+ * Must be registered BEFORE /:id to avoid route conflict.
+ */
+router.get(
+  '/',
+  standardRateLimit,
+  apiKeyAuth,
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const externalUserId = String(req.query['externalUserId'] ?? '').trim();
+    if (!externalUserId) {
+      res.status(400).json({
+        success: false,
+        error: 'Query parameter externalUserId is required',
+        requestId: uuidv4(),
+      });
+      return;
+    }
+    const page = Math.max(1, parseInt(String(req.query['page'] ?? '1'), 10));
+    const limit = Math.min(100, parseInt(String(req.query['limit'] ?? '20'), 10));
+    const withdrawals = await withdrawalService.getWithdrawalsByUser(externalUserId, page, limit);
+    res.json({ success: true, data: withdrawals, requestId: uuidv4() });
+  }),
+);
+
 /** POST /api/v1/withdrawals — initiate a withdrawal */
 router.post(
   '/',
